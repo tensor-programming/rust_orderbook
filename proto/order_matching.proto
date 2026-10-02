@@ -1,0 +1,228 @@
+syntax = "proto3";
+
+package order_matching;
+
+// ===================================================================
+// Enums
+// ===================================================================
+
+enum Side {
+  SIDE_UNSPECIFIED = 0;
+  BUY = 1;
+  SELL = 2;
+}
+
+enum OrderType {
+  ORDER_TYPE_UNSPECIFIED = 0;
+  LIMIT = 1;
+  MARKET = 2;
+  STOP_LIMIT = 3;
+  STOP_MARKET = 4;
+}
+
+enum TimeInForce {
+  TIME_IN_FORCE_UNSPECIFIED = 0;
+  GOOD_TILL_CANCEL = 1;
+  IMMEDIATE_OR_CANCEL = 2;
+  FILL_OR_KILL = 3;
+  GOOD_TILL_DATE = 4;
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  NEW = 1;
+  PARTIALLY_FILLED = 2;
+  FILLED = 3;
+  CANCELLED = 4;
+  REJECTED = 5;
+  EXPIRED = 6;
+  PENDING_TRIGGER = 7;
+}
+
+// ===================================================================
+// Domain Models
+// ===================================================================
+
+message OrderMsg {
+  string id = 1;
+  string symbol = 2;
+  Side side = 3;
+  OrderType order_type = 4;
+  optional string price = 5;
+  string quantity = 6;
+  string filled_quantity = 7;
+  OrderStatus status = 8;
+  TimeInForce time_in_force = 9;
+  optional string stop_price = 10;
+  int64 created_at_unix_ms = 11;
+  int64 updated_at_unix_ms = 12;
+  optional int64 expire_at_unix_ms = 13;
+}
+
+message TradeMsg {
+  string id = 1;
+  string symbol = 2;
+  string buy_order_id = 3;
+  string sell_order_id = 4;
+  string price = 5;
+  string quantity = 6;
+  Side maker_side = 7;
+  int64 created_at_unix_ms = 8;
+}
+
+message PriceLevelMsg {
+  string price = 1;
+  string total_quantity = 2;
+  uint64 order_count = 3;
+}
+
+message OrderBookSnapshotMsg {
+  string symbol = 1;
+  repeated PriceLevelMsg bids = 2;
+  repeated PriceLevelMsg asks = 3;
+  optional string best_bid = 4;
+  optional string best_ask = 5;
+  optional string spread = 6;
+  string bid_depth = 7;
+  string ask_depth = 8;
+  int64 timestamp_unix_ms = 9;
+}
+
+// ===================================================================
+// Trade Events
+// ===================================================================
+
+message TradeEventMsg {
+  oneof event {
+    OrderAcceptedEvent order_accepted = 1;
+    OrderRejectedEvent order_rejected = 2;
+    OrderPartiallyFilledEvent order_partially_filled = 3;
+    OrderFilledEvent order_filled = 4;
+    OrderCancelledEvent order_cancelled = 5;
+    TradeExecutedEvent trade_executed = 6;
+    StopTriggeredEvent stop_triggered = 7;
+  }
+}
+
+message OrderAcceptedEvent {
+  OrderMsg order = 1;
+}
+
+message OrderRejectedEvent {
+  OrderMsg order = 1;
+  string reason = 2;
+}
+
+message OrderPartiallyFilledEvent {
+  OrderMsg order = 1;
+  string filled_qty = 2;
+  string fill_price = 3;
+  string trade_id = 4;
+}
+
+message OrderFilledEvent {
+  OrderMsg order = 1;
+  string filled_qty = 2;
+  string fill_price = 3;
+  string trade_id = 4;
+}
+
+message OrderCancelledEvent {
+  OrderMsg order = 1;
+  string reason = 2;
+}
+
+message TradeExecutedEvent {
+  TradeMsg trade = 1;
+}
+
+message StopTriggeredEvent {
+  OrderMsg original_stop = 1;
+  OrderMsg converted_order = 2;
+}
+
+// ===================================================================
+// RPC Request & Response Messages
+// ===================================================================
+
+message PlaceOrderRequest {
+  string symbol = 1;
+  Side side = 2;
+  OrderType order_type = 3;
+  optional string price = 4;
+  string quantity = 5;
+  TimeInForce time_in_force = 6;
+  optional string stop_price = 7;
+  optional int64 expire_at_unix_ms = 8;
+  optional string custom_order_id = 9;
+}
+
+message PlaceOrderResponse {
+  bool success = 1;
+  string order_id = 2;
+  OrderStatus status = 3;
+  repeated TradeEventMsg events = 4;
+  string message = 5;
+}
+
+message CancelOrderRequest {
+  string symbol = 1;
+  string order_id = 2;
+}
+
+message CancelOrderResponse {
+  bool success = 1;
+  string order_id = 2;
+  OrderStatus status = 3;
+  repeated TradeEventMsg events = 4;
+  string message = 5;
+}
+
+message GetOrderBookRequest {
+  string symbol = 1;
+  uint32 depth = 2;
+}
+
+message GetOrderBookResponse {
+  bool success = 1;
+  OrderBookSnapshotMsg snapshot = 2;
+  string message = 3;
+}
+
+message StreamOrderBookRequest {
+  string symbol = 1;
+  uint32 depth = 2;
+  uint32 interval_ms = 3;
+}
+
+message OrderBookUpdateMsg {
+  string symbol = 1;
+  OrderBookSnapshotMsg snapshot = 2;
+  int64 timestamp_unix_ms = 3;
+}
+
+message StreamEventsRequest {
+  // Optional symbol filter. If empty, streams events for all symbols.
+  optional string symbol = 1;
+}
+
+// ===================================================================
+// Order Matching Service
+// ===================================================================
+
+service OrderMatchingService {
+  // Place an order into the matching engine.
+  rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse);
+
+  // Cancel an existing resting or stop order.
+  rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
+
+  // Get current order book snapshot.
+  rpc GetOrderBook(GetOrderBookRequest) returns (GetOrderBookResponse);
+
+  // Real-time server streaming of order book snapshots / depth updates.
+  rpc StreamOrderBook(StreamOrderBookRequest) returns (stream OrderBookUpdateMsg);
+
+  // Real-time server streaming of engine trade events.
+  rpc StreamEvents(StreamEventsRequest) returns (stream TradeEventMsg);
+}
