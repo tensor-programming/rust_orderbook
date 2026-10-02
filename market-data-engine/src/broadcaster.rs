@@ -85,8 +85,10 @@ impl MarketDataBroadcaster {
         price: Decimal,
     ) {
         let timestamp = Utc::now().timestamp_millis();
-        let target = market_id.as_deref().unwrap_or(symbol);
-        let subscribers = self.subscriptions.get_subscribers_for(target, Channel::Prices);
+        let targets = Self::targets(symbol, market_id.as_deref());
+        let subscribers = self
+            .subscriptions
+            .get_subscribers_for_targets(&targets, Channel::Prices);
 
         if subscribers.is_empty() {
             return;
@@ -111,10 +113,10 @@ impl MarketDataBroadcaster {
         asks: Vec<BookLevel>,
     ) {
         let timestamp = Utc::now().timestamp_millis();
-        let target = market_id.as_deref().unwrap_or(symbol);
+        let targets = Self::targets(symbol, market_id.as_deref());
         let subscribers = self
             .subscriptions
-            .get_subscribers_for(target, Channel::OrderBook);
+            .get_subscribers_for_targets(&targets, Channel::OrderBook);
 
         if subscribers.is_empty() {
             return;
@@ -133,13 +135,10 @@ impl MarketDataBroadcaster {
 
     /// Broadcast enriched orderbook snapshot with analytics (mid-price, micro-price, imbalance).
     pub async fn broadcast_enriched_orderbook(&self, snapshot: EnrichedOrderBookSnapshot) {
-        let target = snapshot
-            .market_id
-            .as_deref()
-            .unwrap_or(&snapshot.symbol);
+        let targets = Self::targets(&snapshot.symbol, snapshot.market_id.as_deref());
         let subscribers = self
             .subscriptions
-            .get_subscribers_for(target, Channel::EnrichedOrderBook);
+            .get_subscribers_for_targets(&targets, Channel::EnrichedOrderBook);
 
         if subscribers.is_empty() {
             return;
@@ -157,10 +156,10 @@ impl MarketDataBroadcaster {
         timeframe: Timeframe,
         candle: Candlestick,
     ) {
-        let target = market_id.as_deref().unwrap_or(symbol);
+        let targets = Self::targets(symbol, market_id.as_deref());
         let subscribers = self
             .subscriptions
-            .get_subscribers_for(target, Channel::Candles(Some(timeframe)));
+            .get_subscribers_for_targets(&targets, Channel::Candles(Some(timeframe)));
 
         if subscribers.is_empty() {
             return;
@@ -184,10 +183,10 @@ impl MarketDataBroadcaster {
         timeframe: Timeframe,
         indicators: TechnicalSnapshot,
     ) {
-        let target = market_id.as_deref().unwrap_or(symbol);
+        let targets = Self::targets(symbol, market_id.as_deref());
         let subscribers = self
             .subscriptions
-            .get_subscribers_for(target, Channel::Indicators(Some(timeframe)));
+            .get_subscribers_for_targets(&targets, Channel::Indicators(Some(timeframe)));
 
         if subscribers.is_empty() {
             return;
@@ -214,8 +213,10 @@ impl MarketDataBroadcaster {
         side: &str,
     ) {
         let timestamp = Utc::now().timestamp_millis();
-        let target = market_id.as_deref().unwrap_or(symbol);
-        let subscribers = self.subscriptions.get_subscribers_for(target, Channel::Trades);
+        let targets = Self::targets(symbol, market_id.as_deref());
+        let subscribers = self
+            .subscriptions
+            .get_subscribers_for_targets(&targets, Channel::Trades);
 
         if subscribers.is_empty() {
             return;
@@ -232,6 +233,14 @@ impl MarketDataBroadcaster {
         };
 
         self.dispatch_to_subscribers(&subscribers, msg).await;
+    }
+
+    fn targets<'a>(symbol: &'a str, market_id: Option<&'a str>) -> Vec<&'a str> {
+        let mut t = vec![symbol];
+        if let Some(m_id) = market_id {
+            t.push(m_id);
+        }
+        t
     }
 
     /// Internal dispatch helper to send message to list of clients concurrently,

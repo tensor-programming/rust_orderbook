@@ -24,6 +24,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let engine = Arc::new(MatchingEngine::new());
 
+    // Start background mock liquidity & trade flow task feeding directly into the Rust OrderBook
+    let enable_mock = std::env::var("ENABLE_MOCK_FLOW").unwrap_or_else(|_| "true".to_string()) != "false";
+    if enable_mock {
+        let mock_engine = Arc::clone(&engine);
+        tokio::spawn(async move {
+            order_matching_engine::run_mock_flow(mock_engine).await;
+        });
+    }
+
     // Configure gRPC address
     let port = std::env::var("GRPC_PORT")
         .unwrap_or_else(|_| "50051".to_string())

@@ -1,0 +1,31 @@
+{
+  "name": "orderbook-debug-client",
+  "version": "1.0.0",
+  "description": "High-performance zero-dependency debug client and metrics dashboard for Rust OrderBook",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "concurrently \"npm run start:gprc\" \"npm run start:websocket\" \"node server.js\"",
+    "cli": "node server.js --cli",
+    "test": "node server.js --test",
+    "start:gprc": "cd.. && cargo run -p order-matching-engine",
+    "start:websocket": "cd.. && cargo run -p market-data-service"
+  },
+  "keywords": [
+    "orderbook",
+    "market-data",
+    "candlesticks",
+    "technical-indicators",
+    "rust",
+    "websocket"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.5",
+    "@grpc/proto-loader": "^0.8.1"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}

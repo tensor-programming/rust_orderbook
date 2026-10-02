@@ -22,6 +22,7 @@
 
 pub mod engine;
 pub mod grpc;
+pub mod mock_flow;
 pub mod orderbook;
 pub mod snapshot;
 pub mod stop_manager;
@@ -31,6 +32,7 @@ pub use grpc::{
     proto, start_grpc_server, OrderMatchingService, OrderMatchingServiceImpl,
     OrderMatchingServiceServer,
 };
+pub use mock_flow::{run_mock_flow, seed_market_liquidity, MarketConfig};
 pub use orderbook::OrderBook;
 pub use snapshot::OrderBookSnapshot;
 pub use stop_manager::StopOrderManager;

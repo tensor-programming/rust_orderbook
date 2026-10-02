@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rust OrderBook | Debug Client & Metrics Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+</head>
+<body>
+  <!-- Top Navigation & Controls Bar -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="brand">
+        <span class="brand-icon">⚡</span>
+        <span class="brand-title">RUST ORDERBOOK</span>
+        <span class="brand-badge">DEBUG CLIENT</span>
+      </div>
+      
+      <!-- Symbol Selector -->
+      <div class="symbol-selector" id="symbolSelector">
+        <button class="symbol-btn active" data-symbol="BTC-USD">BTC-USD</button>
+        <button class="symbol-btn" data-symbol="ETH-USD">ETH-USD</button>
+        <button class="symbol-btn" data-symbol="SOL-USD">SOL-USD</button>
+      </div>
+    </div>
+
+    <!-- Center Simulation & Source Controls -->
+    <div class="header-center">
+      <div class="mode-control">
+        <span class="control-label">SOURCE:</span>
+        <div class="btn-group">
+          <button id="btnSourceLive" class="toggle-btn active" title="Connect to Live Rust WebSocket (ws://localhost:8080)">🦀 Live Engine</button>
+          <button id="btnSourceMock" class="toggle-btn" title="Run built-in client-side mock market data generator">🎲 Mock Engine</button>
+        </div>
+      </div>
+
+      <div class="sim-controls" id="simControls">
+        <button id="btnPlayPause" class="ctrl-btn play" title="Pause or Resume Mock Flow">⏸ Pause</button>
+        <div class="speed-selector">
+          <span class="control-label">SPEED:</span>
+          <select id="simSpeedSelect" class="styled-select">
+            <option value="0.5">0.5x</option>
+            <option value="1.0" selected>1.0x</option>
+            <option value="2.0">2.0x</option>
+            <option value="5.0">5.0x</option>
+          </select>
+        </div>
+        
+        <!-- Injection Trigger Buttons -->
+        <div class="action-triggers">
+          <button id="btnSweepBuy" class="action-btn buy" title="Simulate a taker market buy sweeping 3 ask levels">⚡ Sweep Buy</button>
+          <button id="btnSweepSell" class="action-btn sell" title="Simulate a taker market sell sweeping 3 bid levels">💥 Sweep Sell</button>
+          <button id="btnFlashCrash" class="action-btn crash" title="Simulate volatility spike & stop trigger">📉 Flash Shock</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Header Right: Connection & Health -->
+    <div class="header-right">
+      <div class="backpressure-badge" title="Active backpressure strategy">
+        <span class="bp-icon">🛡️</span>
+        <span id="bpStrategyDisplay">DROP_OLDEST</span>
+      </div>
+      <div class="grpc-status-badge" id="grpcStatusBadge" title="gRPC OrderMatchingService status on port 50051">
+        <span class="status-dot disconnected" id="grpcStatusDot"></span>
+        <span id="grpcStatusText">gRPC: 50051</span>
+      </div>
+      <div class="connection-status" id="connectionStatus">
+        <span class="status-dot disconnected" id="statusDot"></span>
+        <span class="status-text" id="statusText">CONNECTING...</span>
+      </div>
+      <div class="latency-badge" id="latencyBadge" title="WebSocket ping-pong latency">
+        <span id="latencyValue">--</span> ms
+      </div>
+      <div class="throughput-badge" id="throughputBadge" title="Incoming message throughput">
+        <span id="msgRateValue">0</span> msg/s
+      </div>
+      <div class="rate-badge orders-rate" id="orderRateBadge" title="Orders processed per second">
+        <span class="rate-icon">⚡</span> <span id="ordersPerSec">0.0</span> ord/s
+      </div>
+      <div class="rate-badge trades-rate" id="tradeRateBadge" title="Trades executed per second">
+        <span class="rate-icon">🤝</span> <span id="tradesPerSec">0.0</span> trd/s
+      </div>
+    </div>
+  </header>
+
+  <!-- Top Metrics Ticker Bar -->
+  <section class="ticker-bar">
+    <div class="ticker-item price-item">
+      <span class="ticker-label">LAST PRICE</span>
+      <span class="ticker-val price" id="tickerPrice">$0.00</span>
+      <span class="ticker-change up" id="tickerChange">+0.00%</span>
+    </div>
+
+    <div class="ticker-divider"></div>
+
+    <div class="ticker-item">
+      <span class="ticker-label">BEST BID / ASK</span>
+      <div class="bid-ask-val">
+        <span class="bid-val" id="tickerBestBid">$0.00</span>
+        <span class="sep">/</span>
+        <span class="ask-val" id="tickerBestAsk">$0.00</span>
+      </div>
+    </div>
+
+    <div class="ticker-item">
+      <span class="ticker-label">SPREAD (AMT / %)</span>
+      <div class="spread-val">
+        <span id="tickerSpread">$0.00</span>
+        <span class="spread-pct" id="tickerSpreadPct">(0.0000%)</span>
+      </div>
+    </div>
+
+    <div class="ticker-item">
+      <span class="ticker-label">MID-PRICE</span>
+      <span class="ticker-val highlight" id="tickerMidPrice">$0.00</span>
+    </div>
+
+    <div class="ticker-item">
+      <span class="ticker-label" title="Volume-weighted top of book price: (Bid*AskSz + Ask*BidSz)/(BidSz+AskSz)">MICRO-PRICE</span>
+      <span class="ticker-val micro" id="tickerMicroPrice">$0.00</span>
+    </div>
+
+    <div class="ticker-item imbalance-item">
+      <span class="ticker-label" title="Order Imbalance: (BidDepth - AskDepth)/(BidDepth + AskDepth)">ORDER IMBALANCE</span>
+      <div class="imbalance-container">
+        <div class="imbalance-meter">
+          <div class="imbalance-bar" id="tickerImbalanceBar" style="width: 50%;"></div>
+        </div>
+        <span class="imbalance-val" id="tickerImbalanceVal">0.0%</span>
+      </div>
+    </div>
+
+    <div class="ticker-item">
+      <span class="ticker-label">BID / ASK DEPTH</span>
+      <div class="depth-summary">
+        <span class="bid-val" id="tickerBidDepth">0.00</span>
+        <span class="sep">|</span>
+        <span class="ask-val" id="tickerAskDepth">0.00</span>
+      </div>
+    </div>
+
+    <div class="ticker-item">
+      <span class="ticker-label">VWAP</span>
+      <span class="ticker-val vwap" id="tickerVwap">$0.00</span>
+    </div>
+
+    <div class="ticker-item">
+      <span class="ticker-label">24H VOLUME</span>
+      <span class="ticker-val" id="ticker24hVol">0.00 BTC</span>
+    </div>
+
+    <div class="ticker-item">
+      <span class="ticker-label">TOTAL TRADES</span>
+      <span class="ticker-val" id="tickerTradeCount">0</span>
+    </div>
+    <div class="ticker-item">
+      <span class="ticker-label">ORDERS / SEC</span>
+      <span class="ticker-val highlight" id="tickerOrdersPerSec">0.0 ord/s</span>
+    </div>
+    <div class="ticker-item">
+      <span class="ticker-label">TRADES / SEC</span>
+      <span class="ticker-val highlight" id="tickerTradesPerSec">0.0 trd/s</span>
+    </div>
+  </section>
+
+  <!-- Main Trading Workspace Grid -->
+  <main class="workspace-grid">
+    <!-- Left Column: L2 OrderBook & Depth Ladder -->
+    <aside class="panel orderbook-panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="icon">📖</span> ORDERBOOK (L2 DEPTH)
+        </div>
+        <div class="panel-controls">
+          <span class="badge" id="obDepthCount">10 Levels</span>
+        </div>
+      </div>
+
+      <div class="orderbook-table-header">
+        <span class="col-price">PRICE ($)</span>
+        <span class="col-size">SIZE</span>
+        <span class="col-total">TOTAL</span>
+      </div>
+
+      <!-- Asks (Red, Sell Orders - Lowest Ask at Bottom) -->
+      <div class="orderbook-levels asks-container" id="asksContainer">
+        <div class="empty-state">Waiting for asks...</div>
+      </div>
+
+      <!-- Center Spread Bar -->
+      <div class="orderbook-spread-row" id="obSpreadRow">
+        <div class="spread-indicator">
+          <span class="spread-title">SPREAD:</span>
+          <span class="spread-num" id="spreadRowAmount">$0.00</span>
+          <span class="spread-percent" id="spreadRowPercent">0.00%</span>
+        </div>
+        <div class="mid-indicator">
+          <span>MID: </span>
+          <span id="spreadRowMid">$0.00</span>
+        </div>
+      </div>
+
+      <!-- Bids (Green, Buy Orders - Highest Bid at Top) -->
+      <div class="orderbook-levels bids-container" id="bidsContainer">
+        <div class="empty-state">Waiting for bids...</div>
+      </div>
+
+      <!-- Order Imbalance Detailed Meter -->
+      <div class="panel-sub-section">
+        <div class="sub-header">
+          <span>ORDER IMBALANCE PRESSURE</span>
+          <span id="imbalanceStatusPill" class="status-pill neutral">BALANCED</span>
+        </div>
+        <div class="imbalance-detailed-meter">
+          <div class="imbalance-side bid-side" id="detailedBidBar" style="width: 50%;">
+            <span class="side-lbl" id="detailedBidPct">50% Bids</span>
+          </div>
+          <div class="imbalance-side ask-side" id="detailedAskBar" style="width: 50%;">
+            <span class="side-lbl" id="detailedAskPct">50% Asks</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Visual Depth Mini-Chart -->
+      <div class="depth-chart-wrapper">
+        <canvas id="depthMiniCanvas" width="300" height="90"></canvas>
+      </div>
+    </aside>
+
+    <!-- Center Column: Candlestick Chart & Technical Indicators -->
+    <section class="panel chart-panel">
+      <!-- Chart Controls Header -->
+      <div class="chart-header">
+        <div class="timeframe-buttons" id="timeframeSelector">
+          <button class="tf-btn active" data-tf="1s">1s</button>
+          <button class="tf-btn" data-tf="1m">1m</button>
+          <button class="tf-btn" data-tf="5m">5m</button>
+          <button class="tf-btn" data-tf="15m">15m</button>
+          <button class="tf-btn" data-tf="1h">1h</button>
+          <button class="tf-btn" data-tf="1d">1d</button>
+        </div>
+
+        <!-- Indicator Overlay Toggles -->
+        <div class="chart-overlays">
+          <label class="overlay-toggle">
+            <input type="checkbox" id="chkSma20" checked>
+            <span class="color-dot sma20-dot"></span> SMA 20
+          </label>
+          <label class="overlay-toggle">
+            <input type="checkbox" id="chkEma12" checked>
+            <span class="color-dot ema12-dot"></span> EMA 12
+          </label>
+          <label class="overlay-toggle">
+            <input type="checkbox" id="chkBollinger" checked>
+            <span class="color-dot bb-dot"></span> Bollinger Bands
+          </label>
+          <label class="overlay-toggle">
+            <input type="checkbox" id="chkVwap" checked>
+            <span class="color-dot vwap-dot"></span> VWAP
+          </label>
+        </div>
+
+        <div class="chart-status" id="chartHoverInfo">
+          O: <span id="hoverO">--</span> H: <span id="hoverH">--</span> L: <span id="hoverL">--</span> C: <span id="hoverC">--</span> V: <span id="hoverV">--</span>
+        </div>
+      </div>
+
+      <!-- Main Candlestick & Volume Canvas -->
+      <div class="chart-canvas-container" id="canvasWrapper">
+        <canvas id="candlestickCanvas"></canvas>
+      </div>
+
+      <!-- Technical Indicators Panel (Sub-grid) -->
+      <div class="indicators-grid">
+        <!-- Card 1: RSI (14) -->
+        <div class="indicator-card">
+          <div class="card-header">
+            <span class="title">RSI (14)</span>
+            <span class="indicator-pill" id="rsiPill">NEUTRAL</span>
+          </div>
+          <div class="card-body">
+            <div class="gauge-display">
+              <span class="gauge-val" id="rsiValue">50.0</span>
+              <span class="gauge-scale">/ 100</span>
+            </div>
+            <div class="rsi-track">
+              <div class="rsi-zone oversold" title="Oversold (<30)"></div>
+              <div class="rsi-zone neutral" title="Neutral (30-70)"></div>
+              <div class="rsi-zone overbought" title="Overbought (>70)"></div>
+              <div class="rsi-pin" id="rsiPin" style="left: 50%;"></div>
+            </div>
+            <div class="rsi-labels">
+              <span>0</span>
+              <span class="mark">30</span>
+              <span>50</span>
+              <span class="mark">70</span>
+              <span>100</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: MACD (12, 26, 9) -->
+        <div class="indicator-card">
+          <div class="card-header">
+            <span class="title">MACD (12, 26, 9)</span>
+            <span class="indicator-pill" id="macdPill">BULLISH</span>
+          </div>
+          <div class="card-body">
+            <div class="macd-readouts">
+              <div class="readout-item">
+                <span class="lbl">MACD:</span>
+                <span class="val cyan" id="macdLineVal">0.00</span>
+              </div>
+              <div class="readout-item">
+                <span class="lbl">Signal:</span>
+                <span class="val yellow" id="macdSignalVal">0.00</span>
+              </div>
+              <div class="readout-item">
+                <span class="lbl">Hist:</span>
+                <span class="val" id="macdHistVal">0.00</span>
+              </div>
+            </div>
+            <div class="macd-hist-meter">
+              <div class="hist-zero-line"></div>
+              <div class="hist-bar" id="macdHistBar" style="width: 50%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: Bollinger Bands (20, 2) -->
+        <div class="indicator-card">
+          <div class="card-header">
+            <span class="title">BOLLINGER BANDS (20, 2)</span>
+            <span class="indicator-pill" id="bbPill">NORMAL</span>
+          </div>
+          <div class="card-body">
+            <div class="bb-readouts">
+              <div class="bb-row">
+                <span class="lbl">Upper:</span>
+                <span class="val magenta" id="bbUpperVal">$0.00</span>
+              </div>
+              <div class="bb-row">
+                <span class="lbl">Middle (SMA):</span>
+                <span class="val yellow" id="bbMiddleVal">$0.00</span>
+              </div>
+              <div class="bb-row">
+                <span class="lbl">Lower:</span>
+                <span class="val magenta" id="bbLowerVal">$0.00</span>
+              </div>
+              <div class="bb-row highlight-row">
+                <span class="lbl">Bandwidth:</span>
+                <span class="val" id="bbWidthVal">0.00%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4: Moving Averages & Volatility (ATR 14) -->
+        <div class="indicator-card">
+          <div class="card-header">
+            <span class="title">MOVING AVERAGES & ATR</span>
+            <span class="indicator-pill" id="maTrendPill">BULLISH</span>
+          </div>
+          <div class="card-body">
+            <div class="ma-grid">
+              <div class="ma-item">
+                <span class="lbl">SMA 20:</span>
+                <span class="val" id="sma20Val">$0.00</span>
+              </div>
+              <div class="ma-item">
+                <span class="lbl">SMA 50:</span>
+                <span class="val" id="sma50Val">$0.00</span>
+              </div>
+              <div class="ma-item">
+                <span class="lbl">EMA 12:</span>
+                <span class="val cyan" id="ema12Val">$0.00</span>
+              </div>
+              <div class="ma-item">
+                <span class="lbl">EMA 26:</span>
+                <span class="val yellow" id="ema26Val">$0.00</span>
+              </div>
+              <div class="ma-item full-width">
+                <span class="lbl">ATR (14 Volatility):</span>
+                <span class="val purple" id="atrVal">$0.00</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Column: Order Placement Simulator & Time & Sales Tape -->
+    <aside class="panel side-panel">
+      <!-- Order Entry Form -->
+      <div class="panel-section order-entry-section">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="icon">🎯</span> ORDER ENTRY
+          </div>
+          <div class="order-route-group">
+            <button type="button" class="route-tab-btn active" id="btnRouteGrpc" title="Submit directly to Rust Matching Engine over gRPC (port 50051)">⚡ gRPC</button>
+            <button type="button" class="route-tab-btn" id="btnRouteLocal" title="Simulate locally in the client">🎲 Local</button>
+          </div>
+        </div>
+
+        <form id="orderForm" class="order-form" novalidate>
+          <!-- Buy / Sell Side Tabs -->
+          <div class="side-selector">
+            <button type="button" class="side-tab-btn buy active" id="tabBuy">BUY</button>
+            <button type="button" class="side-tab-btn sell" id="tabSell">SELL</button>
+          </div>
+
+          <!-- Order Type Selector -->
+          <div class="form-row">
+            <label for="orderType">ORDER TYPE</label>
+            <select id="orderType" class="styled-select full">
+              <option value="Limit">Limit (FIFO Resting / Maker)</option>
+              <option value="Market">Market (Taker Sweep)</option>
+              <option value="StopLimit">Stop-Limit (Trigger + Limit)</option>
+              <option value="StopMarket">Stop-Market (Trigger + Market)</option>
+            </select>
+          </div>
+
+          <!-- Time In Force -->
+          <div class="form-row">
+            <label for="timeInForce">TIME IN FORCE</label>
+            <select id="timeInForce" class="styled-select full">
+              <option value="GoodTillCancel">GTC (Good Till Cancel)</option>
+              <option value="ImmediateOrCancel">IOC (Immediate Or Cancel)</option>
+              <option value="FillOrKill">FOK (Fill Or Kill)</option>
+            </select>
+          </div>
+
+          <!-- Price Input (Hidden for Market) -->
+          <div class="form-row" id="rowLimitPrice">
+            <label for="orderPrice">LIMIT PRICE ($)</label>
+            <input type="number" id="orderPrice" step="any" min="0.00000001" class="styled-input" placeholder="Price">
+          </div>
+
+          <!-- Stop Price Input (Only for StopLimit / StopMarket) -->
+          <div class="form-row hidden" id="rowStopPrice">
+            <label for="orderStopPrice">STOP TRIGGER PRICE ($)</label>
+            <input type="number" id="orderStopPrice" step="any" min="0.00000001" class="styled-input" placeholder="Trigger Price">
+          </div>
+
+          <!-- Quantity Input (Accepts ANY positive quantity) -->
+          <div class="form-row">
+            <label for="orderQuantity">QUANTITY (SIZE)</label>
+            <div class="input-with-steppers">
+              <input type="number" id="orderQuantity" step="any" min="0.00000001" class="styled-input" value="1.00">
+              <div class="quick-qty-btns">
+                <button type="button" class="qty-btn" data-q="0.1">0.1</button>
+                <button type="button" class="qty-btn" data-q="0.5">0.5</button>
+                <button type="button" class="qty-btn" data-q="1.0">1.0</button>
+                <button type="button" class="qty-btn" data-q="2.5">2.5</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Submit Button -->
+          <button type="submit" id="btnSubmitOrder" class="submit-order-btn buy">
+            PLACE BUY ORDER (via gRPC)
+          </button>
+        </form>
+
+        <!-- Order Execution Feedback Pill -->
+        <div class="order-feedback" id="orderFeedback" style="display: none;">
+          <span class="feedback-icon">✓</span>
+          <span class="feedback-text" id="feedbackText">Order Submitted</span>
+        </div>
+      </div>
+
+      <!-- Pending Stop Orders Tracker -->
+      <div class="panel-section stop-orders-section">
+        <div class="section-title">
+          <span>PENDING STOP ORDERS</span>
+          <span class="count-badge" id="stopOrderCount">0</span>
+        </div>
+        <div class="stop-orders-list" id="stopOrdersList">
+          <div class="empty-hint">No active stop orders. Use Stop-Limit/Stop-Market above to test triggers.</div>
+        </div>
+      </div>
+
+      <!-- Time & Sales Tape (Live Trades) -->
+      <div class="panel-section trades-section">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="icon">⏱️</span> TIME & SALES (TRADES)
+          </div>
+          <span class="badge" id="tradeTapeCount">0 Trades</span>
+        </div>
+
+        <div class="trade-tape-header">
+          <span class="col-time">TIME</span>
+          <span class="col-side">SIDE</span>
+          <span class="col-price">PRICE ($)</span>
+          <span class="col-size">SIZE</span>
+        </div>
+
+        <div class="trade-tape-list" id="tradeTapeList">
+          <div class="empty-state">Waiting for trade executions...</div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Bottom Collapsible Dock: Protocol Inspector & Feature Matrix -->
+  <footer class="app-footer">
+    <div class="footer-tabs">
+      <button class="footer-tab-btn active" data-tab="protocolTab">📡 PROTOCOL & FRAME INSPECTOR</button>
+      <button class="footer-tab-btn" data-tab="matrixTab">✅ ORDERBOOK FEATURES & VERIFICATION</button>
+      <button class="footer-tab-btn" data-tab="settingsTab">⚙️ WEBSOCKET CHANNELS & BACKPRESSURE</button>
+    </div>
+
+    <div class="footer-tab-content">
+      <!-- Tab 1: Protocol Inspector -->
+      <div class="tab-pane active" id="protocolTab">
+        <div class="inspector-controls">
+          <div class="filter-group">
+            <span class="label">FILTER:</span>
+            <button class="filter-pill active" data-filter="all">ALL</button>
+            <button class="filter-pill" data-filter="orderbook">OrderBook</button>
+            <button class="filter-pill" data-filter="orderbook_enriched">Enriched</button>
+            <button class="filter-pill" data-filter="candle_update">Candles</button>
+            <button class="filter-pill" data-filter="indicators_update">Indicators</button>
+            <button class="filter-pill" data-filter="trade">Trades</button>
+            <button class="filter-pill" data-filter="price_update">Prices</button>
+            <button class="filter-pill" data-filter="grpc">gRPC Events</button>
+          </div>
+          <div class="inspector-actions">
+            <button id="btnPauseFrames" class="mini-btn">⏸ Pause Log</button>
+            <button id="btnClearFrames" class="mini-btn">🗑 Clear</button>
+            <button id="btnSendPing" class="mini-btn highlight">⏱ Ping Server</button>
+          </div>
+        </div>
+        <div class="frames-terminal" id="framesTerminal">
+          <!-- Real-time JSON log entries -->
+        </div>
+      </div>
+
+      <!-- Tab 2: Feature Matrix -->
+      <div class="tab-pane" id="matrixTab">
+        <div class="matrix-grid">
+          <div class="matrix-card">
+            <h4>🦀 Order Matching Engine</h4>
+            <ul>
+              <li><span class="check">✓</span> <strong>Price-Time Priority</strong> (FIFO per price level via BTreeMap + VecDeque)</li>
+              <li><span class="check">✓</span> <strong>Multi-Symbol Isolation</strong> (DashMap concurrent books: BTC, ETH, SOL)</li>
+              <li><span class="check">✓</span> <strong>Limit & Market Orders</strong> (Maker resting, Taker immediate sweep)</li>
+              <li><span class="check">✓</span> <strong>Time-in-Force Support</strong> (GTC, IOC partial sweep, FOK all-or-nothing)</li>
+              <li><span class="check">✓</span> <strong>Stop Order Manager</strong> (Stop-Limit & Stop-Market price-triggered chain)</li>
+              <li><span class="check">✓</span> <strong>Tonic gRPC Service</strong> (PlaceOrder, CancelOrder, StreamOrderBook, StreamEvents)</li>
+            </ul>
+          </div>
+
+          <div class="matrix-card">
+            <h4>📊 Market Data & Candlesticks</h4>
+            <ul>
+              <li><span class="check">✓</span> <strong>Multi-Timeframe Candlestick Aggregator</strong> (1s, 1m, 5m, 15m, 1h, 1d)</li>
+              <li><span class="check">✓</span> <strong>OHLCV & Boundary Rollover</strong> (Auto-alignment to UTC timestamp boundaries)</li>
+              <li><span class="check">✓</span> <strong>Enriched OrderBook Analytics</strong> (Spread, Micro-Price, Order Imbalance)</li>
+              <li><span class="check">✓</span> <strong>Volume & Trade Count Tracking</strong> (Base volume & quote volume)</li>
+            </ul>
+          </div>
+
+          <div class="matrix-card">
+            <h4>📈 Technical Indicators Suite</h4>
+            <ul>
+              <li><span class="check">✓</span> <strong>Moving Averages</strong>: SMA(20, 50), EMA(12, 26), WMA(period)</li>
+              <li><span class="check">✓</span> <strong>Momentum</strong>: RSI 14 (Wilder's smoothed with overbought/oversold)</li>
+              <li><span class="check">✓</span> <strong>Trend & MACD</strong>: MACD Line, Signal Line, Histogram</li>
+              <li><span class="check">✓</span> <strong>Volatility</strong>: Bollinger Bands (20, 2 std dev) & Bandwidth %</li>
+              <li><span class="check">✓</span> <strong>Volume & Range</strong>: VWAP (Volume-Weighted Avg Price) & ATR(14)</li>
+            </ul>
+          </div>
+
+          <div class="matrix-card">
+            <h4>⚡ PubSub & Backpressure Engine</h4>
+            <ul>
+              <li><span class="check">✓</span> <strong>DropOldest Strategy</strong> (Ring buffer evicts stale market ticks for freshest L2)</li>
+              <li><span class="check">✓</span> <strong>DropLatest Strategy</strong> (Prevents memory exhaustion on slow clients)</li>
+              <li><span class="check">✓</span> <strong>Throttle Strategy</strong> (Coalesces high-frequency updates to min_interval)</li>
+              <li><span class="check">✓</span> <strong>Zero Node Dependencies</strong> (Pure native Node 26 HTTP & RFC 6455 WebSockets)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 3: Settings -->
+      <div class="tab-pane" id="settingsTab">
+        <div class="settings-form">
+          <div class="settings-col">
+            <h4>WebSocket Channels Subscription</h4>
+            <label><input type="checkbox" id="subChanOrderbook" checked> <code>orderbook</code> (L2 depth levels)</label>
+            <label><input type="checkbox" id="subChanEnriched" checked> <code>orderbook_enriched</code> (Micro-price & Imbalance)</label>
+            <label><input type="checkbox" id="subChanCandles" checked> <code>candles</code> (OHLCV multi-timeframe)</label>
+            <label><input type="checkbox" id="subChanIndicators" checked> <code>indicators</code> (SMA, EMA, RSI, MACD, BB)</label>
+            <label><input type="checkbox" id="subChanTrades" checked> <code>trades</code> (Time & sales executions)</label>
+            <label><input type="checkbox" id="subChanPrices" checked> <code>prices</code> (Ticker price stream)</label>
+            <button id="btnApplySubscriptions" class="mini-btn highlight" style="margin-top: 10px;">Apply Subscriptions</button>
+          </div>
+
+          <div class="settings-col">
+            <h4>Backpressure Strategy</h4>
+            <label><input type="radio" name="bpStrategy" value="drop_oldest" checked> <strong>Drop Oldest</strong> (Recommended for trading UI - freshest quotes)</label>
+            <label><input type="radio" name="bpStrategy" value="drop_latest"> <strong>Drop Latest</strong> (Strict queue capacity limit)</label>
+            <label><input type="radio" name="bpStrategy" value="throttle"> <strong>Throttle (50ms)</strong> (Coalesce rapid ticks)</label>
+          </div>
+
+          <div class="settings-col">
+            <h4>Target Endpoints</h4>
+            <div class="form-row">
+              <label>Rust Market Data WS:</label>
+              <input type="text" id="inputRustWsUrl" class="styled-input" value="ws://localhost:8080">
+            </div>
+            <div class="form-row">
+              <label>Node Mock WS Relay:</label>
+              <input type="text" id="inputNodeWsUrl" class="styled-input" value="ws://localhost:3000/ws">
+            </div>
+            <button id="btnReconnectWs" class="mini-btn">Reconnect Now</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

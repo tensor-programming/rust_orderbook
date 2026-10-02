@@ -120,11 +120,19 @@ impl SubscriptionManager {
 
     /// Get all client IDs that match a given target and channel.
     pub fn get_subscribers_for(&self, target: &str, channel: Channel) -> Vec<Uuid> {
+        self.get_subscribers_for_targets(&[target], channel)
+    }
+
+    /// Get all client IDs that match any of the given targets and channel.
+    pub fn get_subscribers_for_targets(&self, targets: &[&str], channel: Channel) -> Vec<Uuid> {
         let mut matching = Vec::new();
         for entry in self.client_subscriptions.iter() {
             let client_id = entry.key();
             let topics = entry.value();
-            if topics.iter().any(|t| t.matches(target, &channel)) {
+            if topics
+                .iter()
+                .any(|t| targets.iter().any(|target| t.matches(target, &channel)))
+            {
                 matching.push(*client_id);
             }
         }
